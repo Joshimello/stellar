@@ -53,6 +53,9 @@
 			renderer = new SPLAT.WebGLRenderer(canvas);
 			controls = new SPLAT.OrbitControls(camera, canvas);
 
+			// Set white background color
+			renderer.backgroundColor = new SPLAT.Color32(255, 255, 255, 255);
+
 			// Set up camera
 			camera.position = new SPLAT.Vector3(5, 5, 5);
 			controls.setCameraTarget(new SPLAT.Vector3(0, 0, 0));
@@ -94,6 +97,7 @@
 			// Store reference to the splat for potential cleanup
 			loadedSplats.set(chunkId, splat);
 			loadedScenes.add(chunkId);
+			loadedScenes = new Set(loadedScenes);
 
 			console.log(`Loaded PLY splat scene for chunk: ${chunkId}`);
 		} catch (error) {
@@ -110,6 +114,7 @@
 			});
 			loadedSplats.clear();
 			loadedScenes.clear();
+			loadedScenes = new Set();
 			console.log('Cleared all splat scenes');
 		}
 	}
@@ -169,11 +174,11 @@
 	<!-- Viewer controls overlay -->
 	<div class="viewer-controls">
 		<button class="btn btn-sm" onclick={clearScenes} disabled={$splatChunks.length === 0}>
-			Clear Scenes
+			Clear Scene
 		</button>
 
 		<div class="info">
-			<span class="text-sm text-gray-600">
+			<span class="text-sm text-black">
 				Loaded: {loadedScenes.size} / {$splatChunks.length} chunks
 			</span>
 		</div>
@@ -185,7 +190,7 @@
 		position: relative;
 		width: 100%;
 		height: 100%;
-		background: #000;
+		background: #fff;
 	}
 
 	.canvas-container {
@@ -202,7 +207,7 @@
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
-		background: rgba(0, 0, 0, 0.7);
+		background: rgba(0, 0, 0, 0.1);
 		padding: 12px;
 		border-radius: 8px;
 		backdrop-filter: blur(4px);
