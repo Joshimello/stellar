@@ -1,104 +1,127 @@
 <script lang="ts">
-	import { Canvas, T } from '@threlte/core';
-	import { OrbitControls } from '@threlte/extras';
 	import { onDestroy, onMount } from 'svelte';
 	import * as THREE from 'three';
 	import { splatChunks } from '../stores.js';
 
 	// Import dynamically to avoid SSR issues
-	let GaussianSplats3DLib: any = null;
-	let viewer: any = null;
+	let SPLAT: any = null;
+	let scene: any = null;
+	let camera: any = null;
+	let renderer: any = null;
+	let controls: any = null;
+	let canvas: HTMLCanvasElement | null = null;
+	let container: HTMLDivElement | null = null;
 	let threeScene: THREE.Scene | null = null;
 	let loadedScenes = new Set<string>();
+	let loadedSplats = new Map<string, any>();
 	let isLibraryLoaded = false;
+	let animationFrameId: number | null = null;
 
 	// Camera settings
 	let cameraPosition: [number, number, number] = [5, 5, 5];
 	let cameraTarget: [number, number, number] = [0, 0, 0];
 
-	// Load GaussianSplats3D library dynamically
+	// Load gsplat library dynamically
 	onMount(async () => {
 		try {
-			GaussianSplats3DLib = await import('@mkkellogg/gaussian-splats-3d');
+			SPLAT = await import('gsplat');
 			isLibraryLoaded = true;
-			console.log('GaussianSplats3D library loaded');
-			// Initialize viewer if scene is ready
-			if (threeScene) {
+			console.log('gsplat library loaded');
+			// Initialize viewer if container is ready
+			if (container) {
 				initViewer();
 			}
 		} catch (error) {
-			console.error('Failed to load GaussianSplats3D library:', error);
+			console.error('Failed to load gsplat library:', error);
 		}
 	});
 
-	// Initialize the DropInViewer
+	// Initialize the gsplat viewer
 	function initViewer() {
-		if (!threeScene || viewer || !isLibraryLoaded || !GaussianSplats3DLib) return;
+		if (!container || renderer || !isLibraryLoaded || !SPLAT) return;
 
 		try {
-			viewer = new GaussianSplats3DLib.DropInViewer({
-				gpuAcceleratedSort: true,
-				sharedMemoryForWorkers: true,
-				sphericalHarmonicsDegree: 2,
-				halfPrecisionCovariancesOnGPU: true,
-				dynamicScene: false,
-				antialiased: false,
-				focalAdjustment: 1.0,
-				logLevel: GaussianSplats3DLib.LogLevel?.None || 0,
-				enableOptionalEffects: false,
-				inMemoryCompressionLevel: 2,
-				freeIntermediateSplatData: false
-			});
+			// Create canvas and append to container
+			canvas = document.createElement('canvas');
+			canvas.style.width = '100%';
+			canvas.style.height = '100%';
+			container.appendChild(canvas);
 
-			threeScene.add(viewer);
-			console.log('GaussianSplats3D DropInViewer initialized');
+			// Initialize gsplat components
+			scene = new SPLAT.Scene();
+			camera = new SPLAT.Camera();
+			renderer = new SPLAT.WebGLRenderer(canvas);
+			controls = new SPLAT.OrbitControls(camera, canvas);
+
+			// Set up camera
+			camera.position = new SPLAT.Vector3(5, 5, 5);
+			controls.setCameraTarget(new SPLAT.Vector3(0, 0, 0));
+
+			// Start render loop
+			startRenderLoop();
+
+			console.log('gsplat viewer initialized');
 		} catch (error) {
-			console.error('Failed to initialize GaussianSplats3D viewer:', error);
+			console.error('Failed to initialize gsplat viewer:', error);
 		}
 	}
 
-	// Load a new splat scene
+	// Start the render loop
+	function startRenderLoop() {
+		if (!renderer || !scene || !camera || !controls) return;
+
+		const frame = () => {
+			controls.update();
+			renderer.render(scene, camera);
+			animationFrameId = requestAnimationFrame(frame);
+		};
+
+		animationFrameId = requestAnimationFrame(frame);
+	}
+
+	// Load a new splat scene from blob URL
 	async function loadSplatScene(chunkId: string, blobUrl: string) {
-		if (!viewer || loadedScenes.has(chunkId)) return;
+		if (!scene || !SPLAT || loadedScenes.has(chunkId)) return;
 
 		try {
-			await viewer.addSplatScene(blobUrl, {
-				splatAlphaRemovalThreshold: 5,
-				showLoadingUI: false,
-				position: [0, 0, 0],
-				rotation: [0, 0, 0, 1],
-				scale: [1, 1, 1]
-			});
+			// Convert blob URL to ArrayBuffer
+			const response = await fetch(blobUrl);
+			const arrayBuffer = await response.arrayBuffer();
 
+			// Load PLY from ArrayBuffer
+			const splat = SPLAT.PLYLoader.LoadFromArrayBuffer(arrayBuffer, scene);
+
+			// Store reference to the splat for potential cleanup
+			loadedSplats.set(chunkId, splat);
 			loadedScenes.add(chunkId);
-			console.log(`Loaded splat scene for chunk: ${chunkId}`);
+
+			console.log(`Loaded PLY splat scene for chunk: ${chunkId}`);
 		} catch (error) {
-			console.error(`Failed to load splat scene for chunk ${chunkId}:`, error);
+			console.error(`Failed to load PLY splat scene for chunk ${chunkId}:`, error);
 		}
 	}
 
 	// Clear all loaded scenes
 	function clearScenes() {
-		if (viewer && threeScene) {
-			threeScene.remove(viewer);
-			viewer = null;
+		if (scene) {
+			// Remove all splats from scene
+			loadedSplats.forEach((splat) => {
+				scene.removeObject(splat);
+			});
+			loadedSplats.clear();
 			loadedScenes.clear();
-			initViewer();
+			console.log('Cleared all splat scenes');
 		}
 	}
 
-	// Scene reference callback
-	function onSceneMount(scene: THREE.Scene) {
-		threeScene = scene;
-		// Initialize viewer if library is already loaded
-		if (isLibraryLoaded) {
-			initViewer();
-		}
+	// Reactive statement to initialize viewer when container and library are ready
+	$: if (container && isLibraryLoaded && !renderer) {
+		initViewer();
 	}
 
 	// Reactive statement to load new chunks
 	$: {
-		if ($splatChunks.length > 0 && viewer) {
+		if ($splatChunks.length > 0 && scene) {
 			for (const chunk of $splatChunks) {
 				if (!loadedScenes.has(chunk.id)) {
 					loadSplatScene(chunk.id, chunk.url);
@@ -108,47 +131,40 @@
 	}
 
 	onDestroy(() => {
+		// Stop render loop
+		if (animationFrameId) {
+			cancelAnimationFrame(animationFrameId);
+		}
+
 		// Clean up blob URLs
 		$splatChunks.forEach((chunk) => {
 			URL.revokeObjectURL(chunk.url);
 		});
 
-		if (viewer && threeScene) {
-			threeScene.remove(viewer);
+		// Clean up gsplat resources
+		if (renderer) {
+			renderer.dispose?.();
 		}
+
+		// Remove canvas from container
+		if (canvas && container) {
+			container.removeChild(canvas);
+		}
+
+		// Clear references
+		scene = null;
+		camera = null;
+		renderer = null;
+		controls = null;
+		canvas = null;
+		loadedSplats.clear();
+		loadedScenes.clear();
 	});
 </script>
 
 <div class="gaussian-viewer">
-	<Canvas>
-		<T.Scene oncreate={onSceneMount}>
-			<!-- Camera -->
-			<T.PerspectiveCamera makeDefault position={cameraPosition} fov={60} near={0.1} far={1000}>
-				<OrbitControls
-					target={cameraTarget}
-					enableDamping={true}
-					dampingFactor={0.05}
-					enablePan={true}
-					enableZoom={true}
-					enableRotate={true}
-					minDistance={0.5}
-					maxDistance={100}
-					minPolarAngle={0}
-					maxPolarAngle={Math.PI}
-				/>
-			</T.PerspectiveCamera>
-
-			<!-- Lighting -->
-			<T.AmbientLight intensity={0.6} />
-			<T.DirectionalLight position={[10, 10, 5]} intensity={0.4} castShadow={true} />
-
-			<!-- Grid helper for reference -->
-			<T.GridHelper args={[10, 10]} />
-
-			<!-- Axes helper for reference -->
-			<T.AxesHelper args={[1]} />
-		</T.Scene>
-	</Canvas>
+	<!-- gsplat canvas container -->
+	<div class="canvas-container" bind:this={container}></div>
 
 	<!-- Viewer controls overlay -->
 	<div class="viewer-controls">
@@ -170,6 +186,12 @@
 		width: 100%;
 		height: 100%;
 		background: #000;
+	}
+
+	.canvas-container {
+		width: 100%;
+		height: 100%;
+		position: relative;
 	}
 
 	.viewer-controls {

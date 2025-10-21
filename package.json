@@ -33,6 +33,7 @@
 	"dependencies": {
 		"@mkkellogg/gaussian-splats-3d": "^0.4.7",
 		"@threlte/extras": "^9.5.5",
+		"gsplat": "^1.2.9",
 		"svelte-french-toast": "^1.2.0"
 	}
 }
