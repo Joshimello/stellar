@@ -1,6 +1,13 @@
 <script lang="ts">
 	import toast from 'svelte-french-toast';
-	import { imagesQueue, isUploading, sessionConfig, sessionId, uploadProgress } from '../stores.js';
+	import {
+		imagesQueue,
+		isDownloadingChunks,
+		isUploading,
+		sessionConfig,
+		sessionId,
+		uploadProgress
+	} from '../stores.js';
 	import { formatFileSize, imageUploadService, validateImageFiles } from '../upload.js';
 
 	let fileInput: HTMLInputElement;
@@ -69,14 +76,25 @@
 		}
 
 		if (!$sessionId) {
-			toast.error('No active session. Please create a session first.');
+			toast.error('No active session');
 			return;
 		}
 
+		if ($isDownloadingChunks) {
+			toast.error('Upload paused while chunks are downloading');
+			return;
+		}
+
+		const sessionIdValue = $sessionId;
+		const config = $sessionConfig;
+
 		try {
-			// Set upload delay from config
-			imageUploadService.setUploadDelay($sessionConfig.uploadDelay);
-			await imageUploadService.processUploadQueue($imagesQueue, $sessionId);
+			// Apply configuration settings
+			imageUploadService.setUploadDelay(config.uploadDelay);
+			imageUploadService.setConcurrentUploads(config.concurrentUploads);
+
+			await imageUploadService.processUploadQueue($imagesQueue, sessionIdValue);
+			toast.success(`Uploaded ${$imagesQueue.length} images successfully`);
 			imagesQueue.set([]); // Clear queue after successful upload
 		} catch (error) {
 			toast.error(`Upload failed: ${error}`);
@@ -146,7 +164,16 @@
 				<h4>Queue ({$imagesQueue.length} files)</h4>
 				<div class="queue-actions">
 					{#if !$isUploading}
-						<button class="btn btn-primary" on:click={startUpload}> Upload All </button>
+						<button
+							class="btn btn-primary"
+							on:click={startUpload}
+							disabled={$isDownloadingChunks}
+							title={$isDownloadingChunks
+								? 'Upload paused while chunks are downloading'
+								: 'Upload all images'}
+						>
+							{$isDownloadingChunks ? 'Paused (Downloading)' : 'Upload All'}
+						</button>
 						<button class="btn btn-secondary" on:click={clearQueue}> Clear Queue </button>
 					{:else}
 						<button class="btn btn-danger" on:click={cancelUpload}> Cancel Upload </button>
@@ -154,13 +181,17 @@
 				</div>
 			</div>
 
-			<!-- Upload progress -->
+			<!-- Upload progress or download status -->
 			{#if $isUploading}
 				<div class="progress-section">
 					<div class="progress-bar">
 						<div class="progress-fill" style="width: {$uploadProgress}%"></div>
 					</div>
 					<span class="progress-text">{Math.round($uploadProgress)}% complete</span>
+				</div>
+			{:else if $isDownloadingChunks}
+				<div class="download-status">
+					<span class="download-text">⬇️ Downloading chunks... uploads paused</span>
 				</div>
 			{/if}
 
@@ -342,6 +373,21 @@
 	.progress-text {
 		font-size: 0.875rem;
 		color: #6b7280;
+		margin-top: 4px;
+	}
+
+	.download-status {
+		padding: 8px 12px;
+		background: #fef3c7;
+		border: 1px solid #f59e0b;
+		border-radius: 4px;
+		margin-top: 8px;
+	}
+
+	.download-text {
+		font-size: 0.875rem;
+		color: #92400e;
+		font-weight: 500;
 	}
 
 	.file-list {
